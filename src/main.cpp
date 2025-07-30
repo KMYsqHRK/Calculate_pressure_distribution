@@ -95,6 +95,7 @@ int main() {
         auto top_pressure = reader.readCSV("toppressure.csv");
         
         // ソルバーを初期化
+        //(int n, double side_width, double side_height,HeightFunction h_func, double viscosity, double velocity)
         SquareThinFilmFDM solver(100, 0.1, 0.13, nullptr, 0.01, 1.0);
         
         // 共通の時間値を取得（bottompressureファイルから）
