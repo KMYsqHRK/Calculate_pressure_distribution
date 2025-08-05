@@ -48,7 +48,7 @@ void setBoundaryAtTime(SquareThinFilmFDM& solver, double t,
     );
 }
 
-// 時系列での合力を計算する関数
+// 時系列での合力を計算する関数（最適化版）
 std::vector<double> calculateForceTimeSeries(SquareThinFilmFDM& solver,
                                            const std::vector<double>& time_values,
                                            const std::vector<double>& bottom_pressures,
@@ -57,14 +57,29 @@ std::vector<double> calculateForceTimeSeries(SquareThinFilmFDM& solver,
                                            const std::vector<double>& left_pressures) {
     std::vector<double> forces;
     
+    // 最初の時間ステップでシステム行列を構築・LU分解
+    // 2ステップ以降は飛ばされる
+    if (!time_values.empty()) {
+        setBoundaryAtTime(solver, time_values[0], time_values, 
+                         bottom_pressures, right_pressures, 
+                         top_pressures, left_pressures);
+        
+        std::cout << "システム行列を構築・分解中..." << std::endl;
+        if (!solver.buildAndFactorizeMatrix()) {
+            std::cerr << "システム行列の構築・分解に失敗しました" << std::endl;
+            return forces;
+        }
+        std::cout << "システム行列の構築・分解が完了しました" << std::endl;
+    }
+    
     for (size_t i = 0; i < time_values.size(); ++i) {
         // 境界条件を設定
         setBoundaryAtTime(solver, time_values[i], time_values, 
                          bottom_pressures, right_pressures, 
                          top_pressures, left_pressures);
         
-        // 圧力分布を解く
-        if (!solver.solveDirect()) {
+        // キャッシュされた行列を使って高速に解く
+        if (!solver.solveWithCachedMatrix()) {
             std::cerr << "Failed to solve at time step " << i << std::endl;
             forces.push_back(0.0);
             continue;
@@ -100,11 +115,6 @@ int main() {
         
         // 共通の時間値を取得（bottompressureファイルから）
         auto time_values = bottom_pressure.getUniqueValues("simulation_time");
-        
-        // 必要に応じて時間の範囲を制限（計算時間短縮のため）
-        if (time_values.size() > 200) {
-            time_values.resize(200);
-        }
         
         std::cout << "時間ステップ数: " << time_values.size() << std::endl;
         

@@ -25,6 +25,11 @@ private:
     Matrix Y;                // y座標メッシュ
     Matrix P;                // 圧力場
     Matrix h;                // 膜厚
+    
+    // 最適化のためのキャッシュ
+    SparseMatrix A;          // システム行列のキャッシュ
+    Eigen::SparseLU<SparseMatrix> solver; // ソルバーのキャッシュ
+    bool matrix_factorized;  // 行列が分解済みかのフラグ
 
 public:
     /**
@@ -48,12 +53,18 @@ public:
      * @param p_left 左辺の圧力 [Pa]
      */
     void setEdgeBoundary(double p_bottom, double p_right, double p_top, double p_left);
-
+    
     /**
-     * 直接法で定常状態のレイノルズ方程式を解く
+     * システム行列を一度だけ構築・分解する（最適化用）
+     * @return 構築・分解が成功したかどうか
+     */
+    bool buildAndFactorizeMatrix();
+    
+    /**
+     * 既に分解済みの行列を使って高速に解く（最適化用）
      * @return 解が成功したかどうか
      */
-    bool solveDirect();
+    bool solveWithCachedMatrix();
 
     /**
      * 領域全体にわたる合力を計算する
@@ -75,4 +86,16 @@ public:
 
 private:
     void initializeHeight(HeightFunction h_func);
+    
+    /**
+     * システム行列のみを構築する（内部関数）
+     * @param triplets 行列の非零要素を格納するtripletのリスト
+     */
+    void buildSystemMatrix(std::vector<Eigen::Triplet<double>>& triplets);
+    
+    /**
+     * 右辺ベクトルを構築する（内部関数）
+     * @param b 右辺ベクトル
+     */
+    void buildRightHandSide(Vector& b);
 };
