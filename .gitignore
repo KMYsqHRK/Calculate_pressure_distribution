@@ -1,0 +1,32 @@
+# all files in this directory
+# すべてのファイルとディレクトリを除外
+*
+
+# 追跡したいファイル/ディレクトリを例外として指定
+
+# srcディレクトリ直下のファイルのみ追跡
+!src/
+!src/*
+# srcのサブディレクトリは除外
+src/*/
+
+# inputディレクトリ直下のcsvファイルのみ追跡
+!input/
+!input/*.csv
+# inputのサブディレクトリは除外
+input/*/
+
+# CMakeLists.txtファイルを追跡
+!CMakeLists.txt
+
+# READMEファイルを追跡（複数の形式に対応）
+!README
+!README.md
+!README.txt
+!readme
+!readme.md
+!readme.txt
+
+# .gitmodulesファイルを追跡
+!.gitmodules
+!.gitignore
