@@ -74,6 +74,5 @@ public:
     const Matrix& getHeightField() const { return h; }
 
 private:
-    void initializeMesh();
     void initializeHeight(HeightFunction h_func);
 };

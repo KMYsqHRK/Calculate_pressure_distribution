@@ -11,31 +11,11 @@ SquareThinFilmFDM::SquareThinFilmFDM(int n, double side_width, double side_heigh
     dx = side_width / (n - 1);
     dy = side_height / (n - 1);
     
-    // メッシュの初期化
-    initializeMesh();
-    
     // 圧力場の初期化
     P = Matrix::Zero(n, n);
     
     // 膜厚の初期化
     initializeHeight(h_func);
-}
-
-void SquareThinFilmFDM::initializeMesh() {
-    // 座標ベクトルの生成
-    x = Vector::LinSpaced(n, 0.0, width);
-    y = Vector::LinSpaced(n, 0.0, height);
-    
-    // メッシュグリッドの生成
-    X = Matrix(n, n);
-    Y = Matrix(n, n);
-    
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < n; ++j) {
-            X(i, j) = x(j);
-            Y(i, j) = y(i);
-        }
-    }
 }
 
 void SquareThinFilmFDM::initializeHeight(HeightFunction h_func) {
