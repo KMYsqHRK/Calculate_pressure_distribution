@@ -135,6 +135,32 @@ void SquareThinFilmFDM::buildSystemMatrix(std::vector<Eigen::Triplet<double>>& t
     }
 }
 
+// 事前に作成した行列のLU分解を行う(初回のみ呼び出し)
+bool SquareThinFilmFDM::buildAndFactorizeMatrix() {
+    // 内部点のみを扱う
+    int inner_n = n - 2;
+    int n_unknowns = inner_n * inner_n;
+    
+    // スパース行列の構築
+    std::vector<Eigen::Triplet<double>> triplets;
+    buildSystemMatrix(triplets);
+    
+    A.resize(n_unknowns, n_unknowns);
+    A.setFromTriplets(triplets.begin(), triplets.end());
+    
+    // LU分解
+    solver.compute(A);
+    
+    if (solver.info() != Eigen::Success) {
+        std::cerr << "行列の分解に失敗しました" << std::endl;
+        matrix_factorized = false;
+        return false;
+    }
+    
+    matrix_factorized = true;
+    return true;
+}
+
 // 右辺のベクトルを構築する(毎回呼び出し)
 void SquareThinFilmFDM::buildRightHandSide(Vector& b) {
     // 係数の計算
@@ -187,33 +213,7 @@ void SquareThinFilmFDM::buildRightHandSide(Vector& b) {
     }
 }
 
-// 事前に作成した行列のLU分解を行う
-bool SquareThinFilmFDM::buildAndFactorizeMatrix() {
-    // 内部点のみを扱う
-    int inner_n = n - 2;
-    int n_unknowns = inner_n * inner_n;
-    
-    // スパース行列の構築
-    std::vector<Eigen::Triplet<double>> triplets;
-    buildSystemMatrix(triplets);
-    
-    A.resize(n_unknowns, n_unknowns);
-    A.setFromTriplets(triplets.begin(), triplets.end());
-    
-    // LU分解
-    solver.compute(A);
-    
-    if (solver.info() != Eigen::Success) {
-        std::cerr << "行列の分解に失敗しました" << std::endl;
-        matrix_factorized = false;
-        return false;
-    }
-    
-    matrix_factorized = true;
-    return true;
-}
-
-// 事前に分解済みの行列を使って高速に解く
+// 事前に分解済みの行列を使って高速に解く(毎回呼び出し)
 bool SquareThinFilmFDM::solveWithCachedMatrix() {
     if (!matrix_factorized) {
         std::cerr << "行列が分解されていません。先にbuildAndFactorizeMatrix()を呼び出してください。" << std::endl;
@@ -226,7 +226,7 @@ bool SquareThinFilmFDM::solveWithCachedMatrix() {
     
     // 右辺ベクトルの構築
     Vector b = Vector::Zero(n_unknowns);
-    buildRightHandSide(b);
+    buildRightHandSide(b);// 境界条件を設定
     
     // 線形方程式を解く（キャッシュされたLU分解を使用）
     Vector p_inner = solver.solve(b);
