@@ -5,11 +5,19 @@
 SquareThinFilmFDM::SquareThinFilmFDM(int n, double side_width, double side_height,
                                    HeightFunction h_func, double viscosity, double velocity)
     : n(n), width(side_width), height(side_height),
-      viscosity(viscosity), velocity(velocity) {
+      viscosity(viscosity), velocity(velocity), matrix_factorized(false) {
     
     // 格子間隔
     dx = side_width / (n - 1);
     dy = side_height / (n - 1);
+    
+    // 座標の初期化
+    x = Vector(n);
+    y = Vector(n);
+    for (int i = 0; i < n; ++i) {
+        x(i) = i * dx;
+        y(i) = i * dy;
+    }
     
     // 圧力場の初期化
     P = Matrix::Zero(n, n);
@@ -49,27 +57,46 @@ void SquareThinFilmFDM::setEdgeBoundary(double p_bottom, double p_right,
     P(n-1, n-1) = (p_top + p_right) / 2.0;   // 右上
 }
 
-bool SquareThinFilmFDM::solveDirect() {
-    // 係数の計算
-    Matrix h3_12mu = h.array().pow(3) / (12.0 * viscosity);
+double SquareThinFilmFDM::calculateTotalForce() const {
+    // 基本の面積要素
+    double area_element = dx * dy;
+    double total_force = 0.0;
     
-    // 膜厚勾配の計算（中心差分）
-    Matrix dhdx = Matrix::Zero(n, n);
+    // すべての格子点での圧力と面積の積を合計
     for (int i = 0; i < n; ++i) {
-        for (int j = 1; j < n-1; ++j) {
-            dhdx(i, j) = (h(i, j+1) - h(i, j-1)) / (2.0 * dx);
+        for (int j = 0; j < n; ++j) {
+            // 点の位置による面積の重み付け
+            // 境界上の点は内部点の半分の面積を代表し、コーナー点は1/4の面積を代表する
+            double area_coef = 1.0;
+            
+            // 境界上の点の重み付け
+            if (i == 0 || i == n - 1) {
+                area_coef *= 0.5;
+            }
+            if (j == 0 || j == n - 1) {
+                area_coef *= 0.5;
+            }
+            
+            // 修正された面積要素
+            double modified_area = area_element * area_coef;
+            
+            // 力の加算
+            total_force += P(i, j) * modified_area;
         }
     }
     
+    return total_force;
+}
+
+// 事前に係数行列を作成する
+void SquareThinFilmFDM::buildSystemMatrix(std::vector<Eigen::Triplet<double>>& triplets) {
+    // 係数の計算
+    Matrix h3_12mu = h.array().pow(3) / (12.0 * viscosity);
+    
     // 内部点のみを扱う
     int inner_n = n - 2;
-    int n_unknowns = inner_n * inner_n;
     
-    // スパース行列とベクトルの準備
-    std::vector<Eigen::Triplet<double>> triplets;
-    Vector b = Vector::Zero(n_unknowns);
-    
-    // 方程式の構築
+    // システム行列の構築
     int idx = 0;
     for (int i = 1; i < n - 1; ++i) {
         for (int j = 1; j < n - 1; ++j) {
@@ -103,6 +130,40 @@ bool SquareThinFilmFDM::solveDirect() {
                 triplets.emplace_back(idx, idx - inner_n, coef_s);
             }
             
+            idx++;
+        }
+    }
+}
+
+// 右辺のベクトルを構築する(毎回呼び出し)
+void SquareThinFilmFDM::buildRightHandSide(Vector& b) {
+    // 係数の計算
+    Matrix h3_12mu = h.array().pow(3) / (12.0 * viscosity);
+    
+    // 膜厚勾配の計算（中心差分）
+    Matrix dhdx = Matrix::Zero(n, n);
+    for (int i = 0; i < n; ++i) {
+        for (int j = 1; j < n-1; ++j) {
+            dhdx(i, j) = (h(i, j+1) - h(i, j-1)) / (2.0 * dx);
+        }
+    }
+    
+    // 右辺ベクトルの構築
+    int idx = 0;
+    for (int i = 1; i < n - 1; ++i) {
+        for (int j = 1; j < n - 1; ++j) {
+            // 節点の平均膜厚係数
+            double h3_e = 0.5 * (h3_12mu(i, j) + h3_12mu(i, j + 1));
+            double h3_w = 0.5 * (h3_12mu(i, j) + h3_12mu(i, j - 1));
+            double h3_n = 0.5 * (h3_12mu(i, j) + h3_12mu(i + 1, j));
+            double h3_s = 0.5 * (h3_12mu(i, j) + h3_12mu(i - 1, j));
+            
+            // 中心差分の係数
+            double coef_e = h3_e / (dx * dx);
+            double coef_w = h3_w / (dx * dx);
+            double coef_n = h3_n / (dy * dy);
+            double coef_s = h3_s / (dy * dy);
+            
             // 右辺ベクトル
             // すべり速度による項
             b(idx) = -6.0 * velocity * viscosity * dhdx(i, j);
@@ -124,20 +185,50 @@ bool SquareThinFilmFDM::solveDirect() {
             idx++;
         }
     }
+}
+
+// 事前に作成した行列のLU分解を行う
+bool SquareThinFilmFDM::buildAndFactorizeMatrix() {
+    // 内部点のみを扱う
+    int inner_n = n - 2;
+    int n_unknowns = inner_n * inner_n;
     
     // スパース行列の構築
-    SparseMatrix A(n_unknowns, n_unknowns);
+    std::vector<Eigen::Triplet<double>> triplets;
+    buildSystemMatrix(triplets);
+    
+    A.resize(n_unknowns, n_unknowns);
     A.setFromTriplets(triplets.begin(), triplets.end());
     
-    // 線形方程式を解く
-    Eigen::SparseLU<SparseMatrix> solver;
+    // LU分解
     solver.compute(A);
     
     if (solver.info() != Eigen::Success) {
         std::cerr << "行列の分解に失敗しました" << std::endl;
+        matrix_factorized = false;
         return false;
     }
     
+    matrix_factorized = true;
+    return true;
+}
+
+// 事前に分解済みの行列を使って高速に解く
+bool SquareThinFilmFDM::solveWithCachedMatrix() {
+    if (!matrix_factorized) {
+        std::cerr << "行列が分解されていません。先にbuildAndFactorizeMatrix()を呼び出してください。" << std::endl;
+        return false;
+    }
+    
+    // 内部点のみを扱う
+    int inner_n = n - 2;
+    int n_unknowns = inner_n * inner_n;
+    
+    // 右辺ベクトルの構築
+    Vector b = Vector::Zero(n_unknowns);
+    buildRightHandSide(b);
+    
+    // 線形方程式を解く（キャッシュされたLU分解を使用）
     Vector p_inner = solver.solve(b);
     
     if (solver.info() != Eigen::Success) {
@@ -146,7 +237,7 @@ bool SquareThinFilmFDM::solveDirect() {
     }
     
     // 結果を圧力場に反映
-    idx = 0;
+    int idx = 0;
     for (int i = 1; i < n - 1; ++i) {
         for (int j = 1; j < n - 1; ++j) {
             P(i, j) = p_inner(idx);
@@ -155,35 +246,4 @@ bool SquareThinFilmFDM::solveDirect() {
     }
     
     return true;
-}
-
-double SquareThinFilmFDM::calculateTotalForce() const {
-    // 基本の面積要素
-    double area_element = dx * dy;
-    double total_force = 0.0;
-    
-    // すべての格子点での圧力と面積の積を合計
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < n; ++j) {
-            // 点の位置による面積の重み付け
-            // 境界上の点は内部点の半分の面積を代表し、コーナー点は1/4の面積を代表する
-            double area_coef = 1.0;
-            
-            // 境界上の点の重み付け
-            if (i == 0 || i == n - 1) {
-                area_coef *= 0.5;
-            }
-            if (j == 0 || j == n - 1) {
-                area_coef *= 0.5;
-            }
-            
-            // 修正された面積要素
-            double modified_area = area_element * area_coef;
-            
-            // 力の加算
-            total_force += P(i, j) * modified_area;
-        }
-    }
-    
-    return total_force;
 }
