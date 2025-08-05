@@ -168,11 +168,6 @@ void SquareThinFilmFDM::buildRightHandSide(Vector& b) {
     
     // 膜厚勾配の計算（中心差分）
     Matrix dhdx = Matrix::Zero(n, n);
-    for (int i = 0; i < n; ++i) {
-        for (int j = 1; j < n-1; ++j) {
-            dhdx(i, j) = (h(i, j+1) - h(i, j-1)) / (2.0 * dx);
-        }
-    }
     
     // 右辺ベクトルの構築
     int idx = 0;
